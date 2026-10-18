@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Rust
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+
+      - name: Formatting
+        run: cargo +stable fmt --check
+
+      - name: Static analysis
+        run: cargo +stable clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo +stable test --locked
+
+      - name: The launcher parses
+        run: sh -n bin/eleph-gen-graphql-csharp
+
+  # The generated manifest compiled with the entities `eleph-gen-csharp` makes from the same IR, assembled with Elephentity.GraphQL
+  # on the memory driver, executed, and its SDL compared with the PHP stack's (tests/parity).
+  generated:
+    name: Manifests compile, run and match the PHP schema
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: tests/dotnet/global.json
+
+      - name: The runtime the manifests are assembled with
+        run: |
+          git clone https://github.com/hsimah-services/elephentity-dotnet.git tests/dotnet/.deps/elephentity-dotnet
+          git -C tests/dotnet/.deps/elephentity-dotnet checkout "$(cat tests/dotnet/elephentity-dotnet.sha)"
+
+      - name: The C# entity builder
+        run: |
+          git clone https://github.com/hsimah-services/elephentity-codegen-csharp.git tests/dotnet/.deps/elephentity-codegen-csharp
+          git -C tests/dotnet/.deps/elephentity-codegen-csharp checkout "$(cat tests/dotnet/elephentity-codegen-csharp.sha)"
+          cargo +stable build --locked --manifest-path tests/dotnet/.deps/elephentity-codegen-csharp/Cargo.toml
+
+      - name: Build this builder
+        run: cargo +stable build --locked
+
+      - name: Write the generated trees out
+        run: python3 tests/dotnet/materialize.py
+
+      - name: Execution and SDL parity
+        run: dotnet run --project tests/dotnet -c Release

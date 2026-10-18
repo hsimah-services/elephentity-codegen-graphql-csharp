@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Writes the manifest the builder generates for each fixture into Generated/<Name>/CosmosStorageManifest.cs.
+"""Writes, for each fixture, the C# entities `eleph-gen-csharp` makes and the GraphQL manifest this builder makes from the same IR.
 
-Run from anywhere with the built binary at target/{release,debug}/eleph-gen-cosmos. The files are not committed: the
-expected/ trees pin their bytes, and this proves they load into Elephentity.Cosmos.
+    Generated/<Name>/Entities/...   the read models, contracts, catalogue and wiring (the C# target)
+    Generated/<Name>/GraphQL/...    GraphQLManifest.cs (this target)
+
+Run from anywhere with this builder built (cargo build) and the C# builder's binary named by ELEPH_GEN_CSHARP (default:
+tests/dotnet/.deps/elephentity-codegen-csharp/target/debug/eleph-gen-csharp). Neither is committed: the expected/ trees pin the
+manifest's bytes, and this proves they compile against the entities and run.
 """
 import json
 import os
@@ -12,31 +16,55 @@ import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(os.path.dirname(here))
-fixtures = ["clog", "relations", "one-to-one", "many-to-one", "one-to-many", "many-to-many"]
+fixtures = {"book": "Book", "relations": "Relations", "clog": "Clog"}
 
-binary = next((p for p in (f"{root}/target/release/eleph-gen-cosmos", f"{root}/target/debug/eleph-gen-cosmos") if os.path.exists(p)), None)
 
-if binary is None:
-    sys.exit("materialize.py: build the builder first (cargo build).")
+def binary(name, override=None):
+    candidates = [override] if override else []
+    candidates += [f"{root}/target/release/{name}", f"{root}/target/debug/{name}"]
+    found = next((p for p in candidates if p and os.path.exists(p)), None)
 
-out = os.path.join(here, "Generated")
-shutil.rmtree(out, ignore_errors=True)
+    if found is None:
+        sys.exit(f"materialize.py: cannot find {name}; build it first.")
 
-for fixture in fixtures:
-    request = open(f"{root}/tests/fixtures/{fixture}/request.json").read()
-    result = subprocess.run([binary], input=request, capture_output=True, text=True)
+    return found
+
+
+def run(program, request):
+    result = subprocess.run([program], input=json.dumps(request), capture_output=True, text=True)
 
     if result.returncode:
-        sys.exit(f"{fixture}: {result.stderr}")
+        sys.exit(f"{program}: {result.stderr}")
 
     response = json.loads(result.stdout)
 
     if response["errors"]:
-        sys.exit(f"{fixture}: " + "\n".join(response["errors"]))
+        sys.exit("\n".join(response["errors"]))
 
-    for entry in response["files"]:
-        path = os.path.join(out, "".join(p.capitalize() for p in fixture.split("-")), entry["path"])
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        open(path, "w").write(entry["body"])
+    return response["files"]
 
-    print(f"{fixture}: {len(response['files'])} file")
+
+csharp = os.environ.get("ELEPH_GEN_CSHARP") or f"{here}/.deps/elephentity-codegen-csharp/target/debug/eleph-gen-csharp"
+
+if not os.path.exists(csharp):
+    sys.exit(f"materialize.py: the C# builder is not at {csharp}; set ELEPH_GEN_CSHARP.")
+
+graphql = binary("eleph-gen-graphql-csharp")
+out = os.path.join(here, "Generated")
+shutil.rmtree(out, ignore_errors=True)
+
+for fixture, name in fixtures.items():
+    request = json.load(open(f"{root}/tests/fixtures/{fixture}/request.json"))
+
+    entities = dict(request, target="csharp", config={"namespace": f"Golden.{name}", "typeNamespace": f"Golden.{name}.Declared"})
+    plans = [("Entities", csharp, entities), ("GraphQL", graphql, request)]
+
+    for folder, program, body in plans:
+        files = run(program, body)
+
+        for entry in files:
+            path = os.path.join(out, name, folder, entry["path"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w").write(entry["body"])
+
+        print(f"{fixture}/{folder}: {len(files)} file(s)")
