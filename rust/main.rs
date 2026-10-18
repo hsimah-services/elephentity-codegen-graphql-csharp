@@ -282,28 +282,34 @@ fn run(request: &Value) -> Result<Value> {
     // emitter, for a reason that is really "the compiler is ahead of this builder".
     let schema = ir::decode(schema)?;
 
-    let problems = config_problems(target, &request["config"]);
+    let mut problems = config_problems(target, &request["config"]);
 
-    if !problems.is_empty() {
+    // A project that does not take part in GraphQL has nothing to generate, and says nothing about the spec; the configuration is
+    // still checked, so a mistake there is not hidden until the project opts in.
+    if !exposure(&schema["project"]) {
         return Ok(response(vec![], problems));
     }
 
-    // A project that does not take part in GraphQL has nothing to generate, and says nothing about it.
-    if !exposure(&schema["project"]) {
-        return Ok(response(vec![], vec![]));
+    // The spec's problems and the configuration's come back together.
+    if problems.is_empty() {
+        match manifest::generate(
+            &schema,
+            text(&request["config"]["namespace"]),
+            text(&request["config"]["entityNamespace"]),
+        ) {
+            Ok(body) => {
+                return Ok(response(
+                    vec![json!({"path": "GraphQLManifest.cs", "body": body})],
+                    vec![],
+                ))
+            }
+            Err(found) => problems = found,
+        }
+    } else {
+        problems.extend(validation::validate(&schema));
     }
 
-    match manifest::generate(
-        &schema,
-        text(&request["config"]["namespace"]),
-        text(&request["config"]["entityNamespace"]),
-    ) {
-        Ok(body) => Ok(response(
-            vec![json!({"path": "GraphQLManifest.cs", "body": body})],
-            vec![],
-        )),
-        Err(problem) => Ok(response(vec![], vec![problem])),
-    }
+    Ok(response(vec![], problems))
 }
 
 fn main() {

@@ -14,6 +14,12 @@ type Book implements Node {
   id: ID!
 
   """"""
+  priority: Priority
+
+  """"""
+  severity: Priority!
+
+  """"""
   status: BookStatus!
 
   """"""
@@ -27,6 +33,8 @@ enum BookStatus {
 
 input CreateBookInput {
   clientMutationId: String
+  priority: Priority
+  severity: Priority!
   status: BookStatus!
   title: String!
 }
@@ -55,6 +63,12 @@ type PageInfo {
   hasNextPage: Boolean!
   hasPreviousPage: Boolean!
   startCursor: String
+}
+
+enum Priority {
+  HIGH
+  LOW
+  MEDIUM
 }
 
 input RenameBookInput {
@@ -118,6 +132,8 @@ input RootQueryToSearchBooksConnectionWhereArgs {
 input UpdateBookInput {
   clientMutationId: String
   id: ID!
+  priority: Priority
+  severity: Priority
   status: BookStatus
   title: String
 }

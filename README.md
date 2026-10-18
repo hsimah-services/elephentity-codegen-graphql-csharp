@@ -64,7 +64,7 @@ services.AddElephentityGraphQL(GraphQLManifestFactory.Create());   // this
 app.MapElephentityGraphQL("/graphql");
 ```
 
-Errors are reported one at a time, as `eleph-gen-graphql-php` does: a type-name collision (including the generated `*Connection`,
+Every problem is reported at once, with the configuration's: a type-name collision (including the generated `*Connection`,
 `*Edge`, `*WhereArgs`, `*Input` and `*Payload` names), a field called `id`, `databaseId` or `clientMutationId`, an enum with no
 values or labels that upper-case alike, a published query returning an entity that is not exposed.
 
@@ -89,6 +89,7 @@ ELEPH_REFRESH=1 cargo test --locked every_fixture   # rewrite tests/fixtures/*/e
   with `elephentity-graphql-php` on webonyx in the PHP container, and normalises it with graphql-js (`printSchema` over
   `lexicographicSortSchema`, which is what `tsquid-schema fetch` writes). Refresh them when a fixture or the PHP stack changes; a
   difference is a bug in one of the two stacks, and the test says which line.
+- [docs/divergence.md](docs/divergence.md) lists where this builder differs from the PHP one beyond what the SDL shows.
 - `rust/ir.rs` is a byte-identical copy of the PHP builder's, recorded in [SOURCE.md](SOURCE.md) and checked by `tests/ir_copy.rs`.
 
 ## Releasing

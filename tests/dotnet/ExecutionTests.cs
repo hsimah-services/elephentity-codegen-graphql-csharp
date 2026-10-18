@@ -51,7 +51,7 @@ public sealed class ExecutionTests
 
         for (var n = 1; n <= 3; n++)
         {
-            await Run(services, "mutation($t: String!) { createBook(input: { title: $t, status: DRAFT }) { book { id } } }", new { t = $"Book {n}" });
+            await Run(services, "mutation($t: String!) { createBook(input: { title: $t, status: DRAFT, severity: HIGH }) { book { id } } }", new { t = $"Book {n}" });
         }
 
         var page = (await Run(services, "{ books(first: 2) { totalCount nodes { title status } pageInfo { hasNextPage endCursor } } }")).GetProperty("books");
@@ -81,6 +81,34 @@ public sealed class ExecutionTests
 
         Assert.Equal(id, deleted.GetProperty("deletedId").GetString());
         Assert.Equal(2, (await Run(services, "{ books { totalCount } }")).GetProperty("books").GetProperty("totalCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task AnIntegerEnumIsStoredByPositionAndTravelsAsItsLabel()
+    {
+        using var services = Book();
+
+        var created = (await Run(
+            services,
+            "mutation { createBook(input: { title: \"Ranked\", status: LIVE, severity: MEDIUM, priority: HIGH }) { book { id severity priority } } }"))
+            .GetProperty("createBook").GetProperty("book");
+
+        Assert.Equal("MEDIUM", created.GetProperty("severity").GetString());
+        Assert.Equal("HIGH", created.GetProperty("priority").GetString());
+
+        // A nullable one that was never set reads back as null, not as a label.
+        var bare = (await Run(services, "mutation { createBook(input: { title: \"Bare\", status: LIVE, severity: LOW }) { book { severity priority } } }"))
+            .GetProperty("createBook").GetProperty("book");
+
+        Assert.Equal("LOW", bare.GetProperty("severity").GetString());
+        Assert.Equal(JsonValueKind.Null, bare.GetProperty("priority").ValueKind);
+
+        // Underneath, it is the position.
+        var storage = services.GetRequiredService<IStorageAdaptor>();
+        var stored = await storage.QueryAsync(Criteria.For("Book").Where(Filter.Equal("title", "Ranked")), Token);
+
+        Assert.Equal(1L, Convert.ToInt64(stored.Items.Single().Value("severity"), System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(2L, Convert.ToInt64(stored.Items.Single().Value("priority"), System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private static ServiceProvider Relations()
@@ -135,6 +163,22 @@ public sealed class ExecutionTests
         await Run(services, "mutation($id: ID!) { publishPost(input: { id: $id }) { post { id } } }", new { id = post });
 
         Assert.Equal(1, (await Run(services, "{ publishedPosts { totalCount } }")).GetProperty("publishedPosts").GetProperty("totalCount").GetInt32());
+
+        // Page the root collection, then delete a row and see its global id come back to evict. (The first post keeps its tag: the
+        // spec's edge says restrict, so deleting it is refused; a second, unlinked one goes.)
+        var spare = (await Run(services, "mutation { createPost(input: { title: \"Spare\", status: DRAFT, slug: \"spare\", visibility: PUBLIC }) { post { id } } }"))
+            .GetProperty("createPost").GetProperty("post").GetProperty("id").GetString();
+        var posts = (await Run(services, "{ posts(first: 1) { totalCount nodes { id title } pageInfo { hasNextPage endCursor } } }")).GetProperty("posts");
+
+        Assert.Equal(2, posts.GetProperty("totalCount").GetInt32());
+        Assert.Equal(post, posts.GetProperty("nodes")[0].GetProperty("id").GetString());
+        Assert.True(posts.GetProperty("pageInfo").GetProperty("hasNextPage").GetBoolean());
+
+        var deleted = (await Run(services, "mutation($id: ID!) { deletePost(input: { id: $id }) { deletedId } }", new { id = spare })).GetProperty("deletePost");
+
+        Assert.Equal(spare, deleted.GetProperty("deletedId").GetString());
+        Assert.Equal(JsonValueKind.Null, (await Run(services, "query($id: ID!) { post(id: $id) { id } }", new { id = spare })).GetProperty("post").ValueKind);
+        Assert.Equal(1, (await Run(services, "{ posts { totalCount } }")).GetProperty("posts").GetProperty("totalCount").GetInt32());
     }
 
     [Fact]
@@ -155,12 +199,22 @@ public sealed class ExecutionTests
 
         using var provider = services.BuildServiceProvider();
 
-        var location = (await Run(provider, "mutation { createClogLocation(input: { name: \"Pantry\" }) { clogLocation { name } } }")).GetProperty("createClogLocation");
+        var location = (await Run(provider, "mutation { createClogLocation(input: { name: \"Pantry\" }) { clogLocation { id name } } }")).GetProperty("createClogLocation");
+        var locationId = location.GetProperty("clogLocation").GetProperty("id").GetString();
         var empty = await Run(provider, "{ clogItems { totalCount } clogItemSearch(where: { term: \"x\" }) { totalCount } clogLocations { nodes { name } } }");
 
         Assert.Equal("Pantry", location.GetProperty("clogLocation").GetProperty("name").GetString());
         Assert.Equal(0, empty.GetProperty("clogItems").GetProperty("totalCount").GetInt32());
         Assert.Equal(0, empty.GetProperty("clogItemSearch").GetProperty("totalCount").GetInt32());
         Assert.Equal("Pantry", empty.GetProperty("clogLocations").GetProperty("nodes")[0].GetProperty("name").GetString());
+
+        var byId = (await Run(provider, "query($id: ID!) { clogLocation(id: $id) { name } }", new { id = locationId })).GetProperty("clogLocation");
+
+        Assert.Equal("Pantry", byId.GetProperty("name").GetString());
+
+        var deleted = (await Run(provider, "mutation($id: ID!) { deleteClogLocation(input: { id: $id }) { deletedId } }", new { id = locationId })).GetProperty("deleteClogLocation");
+
+        Assert.Equal(locationId, deleted.GetProperty("deletedId").GetString());
+        Assert.Equal(JsonValueKind.Null, (await Run(provider, "query($id: ID!) { clogLocation(id: $id) { name } }", new { id = locationId })).GetProperty("clogLocation").ValueKind);
     }
 }

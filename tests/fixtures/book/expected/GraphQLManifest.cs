@@ -23,6 +23,8 @@ public static class GraphQLManifestFactory
                 ["databaseId"] = new("databaseId", new global::Elephentity.GraphQL.Manifest.GraphQLType("ID", true, false), source => ((global::Golden.Book.Book)source).Id, "The row as storage knows it, unique within its table rather than the schema.", global::Elephentity.GraphQL.Manifest.FieldEncoding.Id, null),
                 ["title"] = new("title", new global::Elephentity.GraphQL.Manifest.GraphQLType("String", true, false), source => ((global::Golden.Book.Book)source).Title, null, global::Elephentity.GraphQL.Manifest.FieldEncoding.Value, null),
                 ["status"] = new("status", new global::Elephentity.GraphQL.Manifest.GraphQLType("BookStatus", true, false), source => global::Golden.Book.Enums.BookStatusWire.ToWire(((global::Golden.Book.Book)source).Status), null, global::Elephentity.GraphQL.Manifest.FieldEncoding.Value, null),
+                ["priority"] = new("priority", new global::Elephentity.GraphQL.Manifest.GraphQLType("Priority", false, false), source => ((global::Golden.Book.Book)source).Priority is { } value ? global::System.Convert.ToString(global::Golden.Book.Enums.PriorityWire.ToWire(value), global::System.Globalization.CultureInfo.InvariantCulture) : null, null, global::Elephentity.GraphQL.Manifest.FieldEncoding.Value, null),
+                ["severity"] = new("severity", new global::Elephentity.GraphQL.Manifest.GraphQLType("Priority", true, false), source => global::System.Convert.ToString(global::Golden.Book.Enums.PriorityWire.ToWire(((global::Golden.Book.Book)source).Severity), global::System.Globalization.CultureInfo.InvariantCulture), null, global::Elephentity.GraphQL.Manifest.FieldEncoding.Value, null),
             },
             source => source is global::Golden.Book.Book,
             null,
@@ -32,6 +34,7 @@ public static class GraphQLManifestFactory
     enums: new global::System.Collections.Generic.Dictionary<string, global::Elephentity.GraphQL.Manifest.EnumTypeEntry>
     {
         ["BookStatus"] = new("BookStatus", new global::System.Collections.Generic.Dictionary<string, string> { ["DRAFT"] = "draft", ["LIVE"] = "live" }),
+        ["Priority"] = new("Priority", new global::System.Collections.Generic.Dictionary<string, string> { ["LOW"] = "0", ["MEDIUM"] = "1", ["HIGH"] = "2" }),
     },
     mutations: new global::System.Collections.Generic.Dictionary<string, global::Elephentity.GraphQL.Manifest.MutationEntry>
     {
@@ -43,6 +46,8 @@ public static class GraphQLManifestFactory
             {
                 ["title"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("String", true, false),
                 ["status"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("BookStatus", true, false),
+                ["priority"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("Priority", false, false),
+                ["severity"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("Priority", true, false),
             },
             null,
             "Create a Book."),
@@ -66,6 +71,8 @@ public static class GraphQLManifestFactory
                 ["id"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("ID", true, false),
                 ["title"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("String", false, false),
                 ["status"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("BookStatus", false, false),
+                ["priority"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("Priority", false, false),
+                ["severity"] = new global::Elephentity.GraphQL.Manifest.GraphQLType("Priority", false, false),
             },
             null,
             "Update a Book."),

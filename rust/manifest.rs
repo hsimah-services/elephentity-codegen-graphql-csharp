@@ -302,8 +302,16 @@ fn mutation(
     )
 }
 
-pub fn generate(schema: &Value, namespace: &str, entity_ns: &str) -> Result<String> {
-    validation::validate(schema)?;
+pub fn generate(
+    schema: &Value,
+    namespace: &str,
+    entity_ns: &str,
+) -> std::result::Result<String, Vec<String>> {
+    let problems = validation::validate(schema);
+
+    if !problems.is_empty() {
+        return Err(problems);
+    }
 
     let mut objects = BTreeMap::new();
     let mut enums = BTreeMap::new();
@@ -556,13 +564,6 @@ pub fn generate(schema: &Value, namespace: &str, entity_ns: &str) -> Result<Stri
 
             let qn = s(&query["name"]);
             let target = &schema["entities"][s(&query["returns"]["type"])];
-
-            if !exposure(target) {
-                return Err(format!(
-                    "{en}::{qn} is published to GraphQL but returns {}, which is not exposed. Expose it, or stop publishing the query.",
-                    s(&query["returns"]["type"])
-                ));
-            }
 
             let field = query["integrations"]["graphql"]["field"]
                 .as_str()

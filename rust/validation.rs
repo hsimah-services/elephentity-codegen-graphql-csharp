@@ -77,7 +77,16 @@ fn reference(schema: &Value, r: &Value) -> Result<()> {
     }
     Ok(())
 }
-pub fn validate(schema: &Value) -> Result<()> {
+fn note(problems: &mut Vec<String>, result: Result<()>) {
+    if let Err(problem) = result {
+        problems.push(problem);
+    }
+}
+/// Every problem with the schema, together, so a spec with three collisions takes one run to fix and not three. (PHP's builder stops at the
+/// first; the rules are the same, the reporting is this repository's convention.)
+pub fn validate(schema: &Value) -> Vec<String> {
+    let mut problems: Vec<String> = Vec::new();
+
     let mut types = [
         "Int",
         "Float",
@@ -97,7 +106,10 @@ pub fn validate(schema: &Value) -> Result<()> {
     let mut mutations = BTreeSet::new();
     for t in vals(&schema["types"]) {
         if !t["values"].is_null() {
-            enumeration(&mut types, s(&t["name"]), &t["values"])?;
+            note(
+                &mut problems,
+                enumeration(&mut types, s(&t["name"]), &t["values"]),
+            );
         }
     }
     let entities = vals(&schema["entities"]);
@@ -106,25 +118,34 @@ pub fn validate(schema: &Value) -> Result<()> {
             continue;
         }
         let n = name(e);
-        claim(&mut types, n, "types")?;
-        connection(&mut types, &mut connections, "RootQuery", n, None)?;
-        claim(&mut roots, &low(n), "root fields")?;
-        claim(&mut roots, &low(&plural(e)), "root fields")?;
+        note(&mut problems, claim(&mut types, n, "types"));
+        note(
+            &mut problems,
+            connection(&mut types, &mut connections, "RootQuery", n, None),
+        );
+        note(&mut problems, claim(&mut roots, &low(n), "root fields"));
+        note(
+            &mut problems,
+            claim(&mut roots, &low(&plural(e)), "root fields"),
+        );
         let mut fields = ["id".to_owned(), "databaseId".to_owned()]
             .into_iter()
             .collect::<BTreeSet<_>>();
         for f in vals(&e["fields"]) {
-            claim(&mut fields, s(&f["name"]), n)?;
-            reference(schema, &f["type"])?;
+            note(&mut problems, claim(&mut fields, s(&f["name"]), n));
+            note(&mut problems, reference(schema, &f["type"]));
             if f["type"]["primitive"] == "enum" {
                 if !f["enum"]["inlineValues"].is_null() {
-                    enumeration(
-                        &mut types,
-                        &format!("{}{}", s(&e["name"]), cap(s(&f["name"]))),
-                        &f["enum"]["inlineValues"],
-                    )?;
+                    note(
+                        &mut problems,
+                        enumeration(
+                            &mut types,
+                            &format!("{}{}", s(&e["name"]), cap(s(&f["name"]))),
+                            &f["enum"]["inlineValues"],
+                        ),
+                    );
                 } else if schema["types"][s(&f["enum"]["declaredType"])]["values"].is_null() {
-                    return Err(format!(
+                    problems.push(format!(
                         "Enum field {}.{} has no enum definition.",
                         n,
                         s(&f["name"])
@@ -134,15 +155,18 @@ pub fn validate(schema: &Value) -> Result<()> {
         }
         for edge in vals(&e["edges"]) {
             if exposure(&schema["entities"][s(&edge["to"])]) {
-                claim(&mut fields, s(&edge["name"]), n)?;
+                note(&mut problems, claim(&mut fields, s(&edge["name"]), n));
                 if edge["cardinality"] == "many" {
-                    connection(
-                        &mut types,
-                        &mut connections,
-                        n,
-                        name(&schema["entities"][s(&edge["to"])]),
-                        None,
-                    )?;
+                    note(
+                        &mut problems,
+                        connection(
+                            &mut types,
+                            &mut connections,
+                            n,
+                            name(&schema["entities"][s(&edge["to"])]),
+                            None,
+                        ),
+                    );
                 }
             }
         }
@@ -157,33 +181,45 @@ pub fn validate(schema: &Value) -> Result<()> {
                     } else {
                         s(&edge["inverse"]["name"]).into()
                     };
-                    claim(&mut fields, &inverse, n)?;
+                    note(&mut problems, claim(&mut fields, &inverse, n));
                     if !b(&edge["inverse"]["unique"]) {
-                        connection(&mut types, &mut connections, n, name(declaring), None)?;
+                        note(
+                            &mut problems,
+                            connection(&mut types, &mut connections, n, name(declaring), None),
+                        );
                     }
                 }
             }
         }
         for kind in ["create", "update", "delete"] {
-            mutation(&mut types, &mut mutations, &format!("{kind}{n}"))?;
+            note(
+                &mut problems,
+                mutation(&mut types, &mut mutations, &format!("{kind}{n}")),
+            );
         }
         for action in vals(&e["actions"]) {
-            mutation(
-                &mut types,
-                &mut mutations,
-                &format!("{}{n}", s(&action["name"])),
-            )?;
+            note(
+                &mut problems,
+                mutation(
+                    &mut types,
+                    &mut mutations,
+                    &format!("{}{n}", s(&action["name"])),
+                ),
+            );
             let mut arguments = ["id".to_owned(), "clientMutationId".to_owned()]
                 .into_iter()
                 .collect::<BTreeSet<_>>();
             for a in vals(&action["arguments"]) {
-                claim(&mut arguments, s(&a["name"]), "action arguments")?;
-                reference(schema, &a["type"])?;
+                note(
+                    &mut problems,
+                    claim(&mut arguments, s(&a["name"]), "action arguments"),
+                );
+                note(&mut problems, reference(schema, &a["type"]));
             }
         }
         // clientMutationId belongs to the Relay envelope, never an entity input.
         if fields.contains("clientMutationId") {
-            return Err(format!(
+            problems.push(format!(
                 "{n}.clientMutationId conflicts with the Relay mutation envelope."
             ));
         }
@@ -194,22 +230,38 @@ pub fn validate(schema: &Value) -> Result<()> {
             let field = query["integrations"]["graphql"]["field"]
                 .as_str()
                 .unwrap_or(s(&query["name"]));
-            claim(&mut roots, field, "root fields")?;
+            note(&mut problems, claim(&mut roots, field, "root fields"));
+            if !exposure(&schema["entities"][s(&query["returns"]["type"])]) {
+                problems.push(format!(
+                    "{}::{} is published to GraphQL but returns {}, which is not exposed. Expose it, or stop publishing the query.",
+                    s(&e["name"]),
+                    s(&query["name"]),
+                    s(&query["returns"]["type"])
+                ));
+
+                continue;
+            }
             if query["returns"]["cardinality"] == "many" {
-                connection(
-                    &mut types,
-                    &mut connections,
-                    "RootQuery",
-                    name(&schema["entities"][s(&query["returns"]["type"])]),
-                    Some(field),
-                )?;
+                note(
+                    &mut problems,
+                    connection(
+                        &mut types,
+                        &mut connections,
+                        "RootQuery",
+                        name(&schema["entities"][s(&query["returns"]["type"])]),
+                        Some(field),
+                    ),
+                );
             }
             let mut arguments = BTreeSet::new();
             for a in vals(&query["arguments"]) {
-                claim(&mut arguments, s(&a["name"]), "query arguments")?;
-                reference(schema, &a["type"])?;
+                note(
+                    &mut problems,
+                    claim(&mut arguments, s(&a["name"]), "query arguments"),
+                );
+                note(&mut problems, reference(schema, &a["type"]));
             }
         }
     }
-    Ok(())
+    problems
 }

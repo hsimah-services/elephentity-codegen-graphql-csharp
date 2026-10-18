@@ -366,3 +366,79 @@ fn malformed_input_is_a_non_zero_exit_with_nothing_on_stdout() {
         );
     }
 }
+
+#[test]
+fn every_problem_in_the_spec_is_reported_in_one_run() {
+    let mut request = fixture("book");
+    let template = request["schema"]["entities"]["Book"]["fields"]["title"].clone();
+    let mut envelope = template;
+
+    envelope["name"] = json!("clientMutationId");
+    request["schema"]["entities"]["Book"]["fields"]["clientMutationId"] = envelope;
+    request["schema"]["entities"]["Book"]["integrations"]["graphql"]["plural"] = json!("Book");
+    add_entity(&mut request, "Volume", "Book", "Volumes");
+
+    let response = answer(&request);
+    let problems = errors(&response);
+
+    assert_eq!(response["files"], json!([]));
+    assert!(
+        problems.iter().any(|p| p.contains("clientMutationId")),
+        "{problems:?}"
+    );
+    assert!(
+        problems.iter().any(|p| p.contains("root fields")),
+        "{problems:?}"
+    );
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("\"Book\" is duplicated")),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn configuration_and_spec_problems_come_back_together() {
+    let mut request = fixture("book");
+    request["config"] = json!({"namespace": "My-App", "entityNamespace": "App"});
+    request["schema"]["entities"]["Book"]["integrations"]["graphql"]["plural"] = json!("Book");
+
+    let problems = errors(&answer(&request));
+
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("not a valid C# namespace")),
+        "{problems:?}"
+    );
+    assert!(
+        problems.iter().any(|p| p.contains("root fields")),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn an_unexposed_query_target_is_collected_with_the_rest() {
+    let mut request = fixture("book");
+    request["schema"]["entities"]["Book"]["queries"]["search"]["integrations"] =
+        json!({"graphql": {"field": "searchBooks"}});
+    add_entity(&mut request, "Hidden", "Hidden", "Hiddens");
+    request["schema"]["entities"]["Hidden"]
+        .as_object_mut()
+        .unwrap()
+        .remove("integrations");
+    request["schema"]["entities"]["Book"]["queries"]["search"]["returns"]["type"] = json!("Hidden");
+    request["schema"]["entities"]["Book"]["integrations"]["graphql"]["plural"] = json!("Book");
+
+    let problems = errors(&answer(&request));
+
+    assert!(
+        problems.iter().any(|p| p.contains("is not exposed")),
+        "{problems:?}"
+    );
+    assert!(
+        problems.iter().any(|p| p.contains("root fields")),
+        "{problems:?}"
+    );
+}
