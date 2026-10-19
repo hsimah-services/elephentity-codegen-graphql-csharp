@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-# Resolve links first: Composer links this file into vendor/bin.
+# Resolve links first, so the launcher works when run through a symlink.
 self=$0
 while [ -h "$self" ]; do
     target=$(readlink "$self")
