@@ -1,3 +1,9 @@
+> **Archived: this repository moved into [`hsimah-services/elephentity`](https://github.com/hsimah-services/elephentity/tree/main/builders/codegen-graphql-csharp).**
+> It is `builders/codegen-graphql-csharp/` there, with the GraphQL.NET builder. C# is now the primary target, and one repository lets a
+> change to the compiler, a builder and the .NET runtime land in one pull request, with one CI and one
+> set of issues. The history was not carried over; this repository keeps it, read-only. Releases are `eleph-gen-graphql-csharp-v<version>` tags there; `eleph install` reads them from `hsimah-services/elephentity`.
+> Open issues and pull requests go to `elephentity`.
+
 # elephentity-codegen-graphql-csharp
 
 The GraphQL builder for the .NET stack of [Elephentity](https://github.com/hsimah-services/elephentity): the compiled spec in, the
